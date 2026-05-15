@@ -74,6 +74,27 @@ The full fix loop:
    call the tool again. The same gate runs on every follow-up `gh_push_branch`,
    so a green local check reduces the chance of CI failure on the resulting push.
    The host tools also refuse dirty working trees or commit author mismatches.
+
+   **Escape hatch for pre-existing breakage.** If `bun run fix` or `bun check`
+   fails and you have **verified** the failure is pre-existing on the default
+   branch (not caused by your diff), retry with `skip_checks=true`. Verify by
+   running the same command against the same paths on a clean checkout of the
+   default branch and confirming the identical failure. NEVER use
+   `skip_checks` to bypass a failure your diff introduced, and NEVER use it
+   to route around a transient or unclear failure. When you bypass, document
+   it in the PR's `## Verification` section (one sentence: ``bun check` fails
+   on `main` for unrelated reason X; skipped pre-publish gate.`).
+
+   **Never tamper with git internals.** Do not edit `.git`/`gitdir:`
+   pointers, do not chown/chmod worktree files, do not add `safe.directory`
+   overrides, do not point HEAD at a fabricated commit. If a push is being
+   refused for reasons you cannot resolve, post a comment asking the
+   maintainer (or use `mark_unable_to_reproduce`) — do not improvise.
+
+   **Two strikes rule.** Two consecutive `gh_push_branch` rejections with
+   the same error is a workflow bug. Either fix the cause, use
+   `skip_checks=true` with justification, or escalate via `gh_post_comment`.
+   Do not loop indefinitely.
 10. After the PR is open, comment once more linking it.
 
 If you cannot reproduce after a real attempt, call `mark_unable_to_reproduce`

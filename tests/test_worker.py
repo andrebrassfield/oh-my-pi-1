@@ -28,6 +28,7 @@ class _FakeRpcClient:
         self.stop_calls = 0
         self.mark_closed_calls: list[BaseException] = []
         _FakeRpcClient.instances.append(self)
+
     def __enter__(self):
         return self
 

@@ -136,7 +136,14 @@ def _format_process_output(stdout: Any, stderr: Any) -> str:
     )
 
 
-def _run_pre_publish_bun_fix(bindings: ToolBindings, args: Mapping[str, Any], *, tool_name: str, stage: str) -> None:
+def _run_pre_publish_bun_fix(
+    bindings: ToolBindings,
+    args: Mapping[str, Any],
+    *,
+    tool_name: str,
+    stage: str,
+    skip_checks: bool = False,
+) -> None:
     """Run `bun run fix` then commit any working-tree diff as the bot.
 
     Silently no-ops when the repository does not define a `scripts.fix`
@@ -147,6 +154,12 @@ def _run_pre_publish_bun_fix(bindings: ToolBindings, args: Mapping[str, Any], *,
     `tool_name` is the host tool calling this (audit attribution).
     `stage` is the human-readable verb used in error wording — "open PR"
     when called from `gh_open_pr`, "push" when called from `gh_push_branch`.
+
+    `skip_checks` is the agent-supplied escape hatch: when True, the
+    formatter is NOT invoked and any post-fix commit is skipped, so a
+    broken-formatter situation on `main` (unrelated to the agent's diff)
+    doesn't strand the push forever. The dirty-tree gate still runs — we
+    never let uncommitted changes leak into a remote ref.
     """
     if not _has_bun_script(bindings.workspace.repo_dir, "fix"):
         return
@@ -174,6 +187,14 @@ def _run_pre_publish_bun_fix(bindings: ToolBindings, args: Mapping[str, Any], *,
         )
         _audit(bindings, tool_name, args, error=msg)
         _raise_command(msg)
+    if skip_checks:
+        _audit(
+            bindings,
+            tool_name,
+            args,
+            result={"skipped": "bun_run_fix", "reason": "skip_checks=true"},
+        )
+        return
     try:
         proc = subprocess.run(
             _PRE_PR_FIX_COMMAND,
@@ -253,7 +274,26 @@ def _run_pre_publish_bun_fix(bindings: ToolBindings, args: Mapping[str, Any], *,
         _raise_command(msg)
 
 
-def _run_pre_publish_bun_check(bindings: ToolBindings, args: Mapping[str, Any], *, tool_name: str, stage: str) -> None:
+def _run_pre_publish_bun_check(
+    bindings: ToolBindings,
+    args: Mapping[str, Any],
+    *,
+    tool_name: str,
+    stage: str,
+    skip_checks: bool = False,
+) -> None:
+    """Run `bun check` before publishing. When `skip_checks=True` the check
+    is not invoked — used to escape pre-existing breakage on `main` that
+    the agent's diff did not cause.
+    """
+    if skip_checks:
+        _audit(
+            bindings,
+            tool_name,
+            args,
+            result={"skipped": "bun_check", "reason": "skip_checks=true"},
+        )
+        return
     if not _has_bun_script(bindings.workspace.repo_dir, "check"):
         return
     try:
@@ -452,13 +492,17 @@ def _guarded_push_branch(bindings: ToolBindings, args: Mapping[str, Any], tool_n
 def _build_push_branch(bindings: ToolBindings) -> HostTool[Any, Any]:
     def execute(args: dict[str, Any], _ctx: HostToolContext[Any]) -> str:
         branch = str(args.get("branch") or bindings.workspace.branch)
+        skip = bool(args.get("skip_checks", False))
         # Same gate as gh_open_pr — formatter + check before bytes leave the
         # workstation, so CI doesn't blow up on a follow-up commit. The fix
         # pass auto-commits any formatter diff so the push includes it.
-        _run_pre_publish_bun_fix(bindings, args, tool_name="gh_push_branch", stage="push")
-        _run_pre_publish_bun_check(bindings, args, tool_name="gh_push_branch", stage="push")
+        # `skip_checks=true` bypasses the formatter/check (e.g. when `main`
+        # itself is broken); dirty-tree gate still runs unconditionally.
+        _run_pre_publish_bun_fix(bindings, args, tool_name="gh_push_branch", stage="push", skip_checks=skip)
+        _run_pre_publish_bun_check(bindings, args, tool_name="gh_push_branch", stage="push", skip_checks=skip)
         head = _guarded_push_branch(bindings, args, "gh_push_branch", branch)
-        return f"pushed {branch} at {head[:12]} as {bindings.author_name} <{bindings.author_email}>"
+        suffix = " (pre-push checks skipped)" if skip else ""
+        return f"pushed {branch} at {head[:12]} as {bindings.author_name} <{bindings.author_email}>{suffix}"
 
     return host_tool(
         name="gh_push_branch",
@@ -469,6 +513,10 @@ def _build_push_branch(bindings: ToolBindings) -> HostTool[Any, Any]:
                 "branch": {
                     "type": "string",
                     "description": persona.host_tool_parameter_description("gh_push_branch", "branch"),
+                },
+                "skip_checks": {
+                    "type": "boolean",
+                    "description": persona.host_tool_parameter_description("gh_push_branch", "skip_checks"),
                 },
             },
             "additionalProperties": False,
@@ -502,8 +550,9 @@ def _build_open_pr(bindings: ToolBindings) -> HostTool[Any, Any]:
                 "GitHub auto-closes the issue when the PR merges. Put it at the end of the "
                 "Verification section per the template."
             )
-        _run_pre_publish_bun_fix(bindings, args, tool_name="gh_open_pr", stage="open PR")
-        _run_pre_publish_bun_check(bindings, args, tool_name="gh_open_pr", stage="open PR")
+        skip = bool(args.get("skip_checks", False))
+        _run_pre_publish_bun_fix(bindings, args, tool_name="gh_open_pr", stage="open PR", skip_checks=skip)
+        _run_pre_publish_bun_check(bindings, args, tool_name="gh_open_pr", stage="open PR", skip_checks=skip)
         # Make sure the branch is pushed (idempotent) using the same preflight as gh_push_branch.
         _guarded_push_branch(bindings, args, "gh_open_pr", bindings.workspace.branch)
         base = args.get("base") or bindings.repo.default_branch
@@ -557,6 +606,10 @@ def _build_open_pr(bindings: ToolBindings) -> HostTool[Any, Any]:
                     "description": persona.host_tool_parameter_description("gh_open_pr", "base"),
                 },
                 "draft": {"type": "boolean", "default": False},
+                "skip_checks": {
+                    "type": "boolean",
+                    "description": persona.host_tool_parameter_description("gh_open_pr", "skip_checks"),
+                },
             },
             "required": ["title", "body"],
             "additionalProperties": False,
@@ -888,7 +941,11 @@ def _build_classify_issue(bindings: ToolBindings) -> HostTool[Any, Any]:
         renamed_to: str | None = None
         if branch_slug:
             try:
-                renamed_to = rename_workspace_branch(bindings.workspace, branch_slug)
+                renamed_to = rename_workspace_branch(
+                    bindings.workspace,
+                    branch_slug,
+                    pr_number=existing.pr_number if existing is not None else None,
+                )
             except ValueError as exc:
                 _audit(bindings, "classify_issue", args, error=str(exc))
                 _raise_command(f"classify_issue rejected branch_slug: {exc}")

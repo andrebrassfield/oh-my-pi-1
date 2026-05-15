@@ -173,6 +173,39 @@ def test_rename_workspace_branch_rejects_bad_slug(tmp_path: Path, bad: object) -
         rename_workspace_branch(ws, bad)  # type: ignore[arg-type]
 
 
+def test_rename_workspace_branch_noop_when_pr_open(tmp_path: Path) -> None:
+    """A non-None ``pr_number`` makes rename a no-op: an open PR on origin
+    still tracks the current branch, and renaming would orphan it."""
+    root = tmp_path / "ws"
+    repo_dir = root / "repo"
+    initial = "farm/abc12345/old-slug"
+    _init_worktree_repo(repo_dir, initial)
+    ws = Workspace(
+        root=root,
+        repo_dir=repo_dir,
+        session_dir=root / ".omp-session",
+        context_dir=root / "context",
+        artifacts_dir=root / "artifacts",
+        branch=initial,
+        repo_full_name="octo/widget",
+        issue_number=1,
+    )
+    out = rename_workspace_branch(ws, "new-slug", pr_number=42)
+    assert out == initial
+    assert ws.branch == initial
+    head = subprocess.run(
+        ["git", "symbolic-ref", "HEAD"],
+        cwd=str(repo_dir),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert head == f"refs/heads/{initial}"
+    # An invalid slug must still be rejected even when pr_number suppresses the rename.
+    with pytest.raises(ValueError):
+        rename_workspace_branch(ws, "Bad Slug", pr_number=42)
+
+
 def test_rename_workspace_branch_rejects_non_farm_branch(tmp_path: Path) -> None:
     ws = _workspace(tmp_path / "ws")
     ws.branch = "main"

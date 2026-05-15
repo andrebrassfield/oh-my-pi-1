@@ -106,7 +106,12 @@ def validate_branch_slug(slug: object) -> str:
     return slug
 
 
-def rename_workspace_branch(workspace: Workspace, new_slug: str) -> str:
+def rename_workspace_branch(
+    workspace: Workspace,
+    new_slug: str,
+    *,
+    pr_number: int | None = None,
+) -> str:
     """Rename the workspace's local branch to ``farm/<hex>/<new_slug>``.
 
     The 8-hex disambiguator stays untouched; only the trailing slug after
@@ -119,6 +124,12 @@ def rename_workspace_branch(workspace: Workspace, new_slug: str) -> str:
     workspace whose branch isn't on the ``farm/<hex>/<slug>`` shape.
     Raises ``GitCommandError`` if the underlying ``git`` invocation fails
     (e.g. the target branch name is already taken).
+
+    When ``pr_number`` is provided (non-None), the rename is a no-op: an
+    open PR on origin still tracks ``workspace.branch``, and renaming it
+    locally would orphan the PR by leaving its head on a branch that no
+    longer receives pushes. The slug is still validated so callers see
+    the same input errors as the rename path.
     """
     validate_branch_slug(new_slug)
     parts = workspace.branch.split("/", 2)
@@ -127,6 +138,14 @@ def rename_workspace_branch(workspace: Workspace, new_slug: str) -> str:
     new_branch = f"farm/{parts[1]}/{new_slug}"
     if new_branch == workspace.branch:
         return new_branch
+    if pr_number is not None:
+        log.warning(
+            "rename_workspace_branch skipped: PR #%d already tracks %r; refusing to rename to %r",
+            pr_number,
+            workspace.branch,
+            new_branch,
+        )
+        return workspace.branch
     proc = _safe_run(
         ["git", "branch", "-m", workspace.branch, new_branch],
         cwd=workspace.repo_dir,

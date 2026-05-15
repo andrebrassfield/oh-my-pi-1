@@ -1656,6 +1656,290 @@ def test_gh_push_branch_aborts_on_failed_bun_check(
     assert "TypeError: property missing" in row["error"]
 
 
+def test_gh_push_branch_skip_checks_bypasses_failing_bun_check(
+    db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`skip_checks=true` bypasses a failing `bun check` and pushes anyway.
+
+    Models the scenario where `main` itself is broken (e.g. an unrelated
+    formatter/typecheck failure) and the agent has verified that the
+    failure is pre-existing — re-running the gate forever would never
+    succeed.
+    """
+    import os
+    import subprocess
+
+    bare = tmp_path / "upstream.git"
+    bare.mkdir()
+    subprocess.run(["git", "init", "--bare", "--initial-branch=main", str(bare)], check=True, capture_output=True)
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    env = os.environ | {
+        "GIT_AUTHOR_NAME": "robomp-bot",
+        "GIT_AUTHOR_EMAIL": "robomp-bot@example.invalid",
+        "GIT_COMMITTER_NAME": "robomp-bot",
+        "GIT_COMMITTER_EMAIL": "robomp-bot@example.invalid",
+    }
+    subprocess.run(["git", "init", "--initial-branch=main", str(seed)], check=True, capture_output=True)
+    (seed / "README.md").write_text("init\n")
+    for cmd in (
+        ["git", "-C", str(seed), "add", "."],
+        [
+            "git",
+            "-C",
+            str(seed),
+            "-c",
+            "user.email=robomp-bot@example.invalid",
+            "-c",
+            "user.name=robomp-bot",
+            "commit",
+            "-m",
+            "init",
+        ],
+        ["git", "-C", str(seed), "remote", "add", "origin", str(bare)],
+        ["git", "-C", str(seed), "push", "origin", "main"],
+    ):
+        subprocess.run(cmd, check=True, capture_output=True, env=env)
+
+    from robomp.sandbox import SandboxManager
+
+    mgr = SandboxManager(tmp_path / "workspaces")
+    ws = mgr.ensure_workspace(
+        repo="octo/widget",
+        number=42,
+        title="skip checks",
+        clone_url=str(bare),
+        default_branch="main",
+        author_name="robomp-bot",
+        author_email="robomp-bot@example.invalid",
+    )
+
+    fakebin = tmp_path / "fakebin"
+    fakebin.mkdir()
+    bun_invocations = fakebin / "bun.log"
+    fake_bun = fakebin / "bun"
+    fake_bun.write_text(
+        "#!/bin/sh\n"
+        f'echo "$@" >> "{bun_invocations}"\n'
+        # Both `fix` and `check` would fail — but skip_checks must short-circuit
+        # so this script is never invoked for them.
+        "exit 1\n"
+    )
+    fake_bun.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fakebin}{os.pathsep}{os.environ['PATH']}")
+
+    (ws.repo_dir / "package.json").write_text(
+        json.dumps({"scripts": {"fix": "ruff format", "check": "tsc --noEmit"}}) + "\n",
+        encoding="utf-8",
+    )
+    (ws.repo_dir / "feature.txt").write_text("feature\n")
+    subprocess.run(
+        ["git", "-C", str(ws.repo_dir), "add", "package.json", "feature.txt"], check=True, capture_output=True
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(ws.repo_dir),
+            "-c",
+            "user.email=robomp-bot@example.invalid",
+            "-c",
+            "user.name=robomp-bot",
+            "commit",
+            "-m",
+            "ok",
+        ],
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+
+    github = GitHubClient("tok", transport=httpx.MockTransport(lambda r: httpx.Response(500)))
+    loop, thread = _make_loop_in_background()
+    try:
+        bindings = ToolBindings(
+            db=db,
+            github=github,
+            git_transport=LocalGitTransport(token=None),
+            repo=_stub_repo(),
+            issue=IssueInfo(
+                repo="octo/widget",
+                number=42,
+                title="t",
+                body="",
+                state="open",
+                author="alice",
+                labels=(),
+                is_pull_request=False,
+            ),
+            workspace=ws,
+            loop=loop,
+            author_name="robomp-bot",
+            author_email="robomp-bot@example.invalid",
+        )
+        db.upsert_issue(
+            key=bindings.issue_key,
+            repo="octo/widget",
+            number=42,
+            state="reproducing",
+            branch=ws.branch,
+            session_dir=str(ws.session_dir),
+        )
+        tool = next(x for x in build(bindings) if x.name == "gh_push_branch")
+        result = tool.execute({"skip_checks": True}, _ctx())
+    finally:
+        _stop_loop(loop, thread)
+
+    assert "pushed" in result
+    assert "pre-push checks skipped" in result
+    # Bun was never invoked — both `fix` and `check` were short-circuited.
+    assert not bun_invocations.exists(), bun_invocations.read_text()
+    # The branch DID reach the remote.
+    refs = subprocess.run(
+        ["git", "-C", str(bare), "for-each-ref", "--format=%(refname)"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert any(r.startswith("refs/heads/farm/") for r in refs.stdout.splitlines()), refs.stdout
+    # Audit row records the skip.
+    rows = db._conn.execute(
+        "SELECT tool, result_json FROM tool_calls WHERE tool='gh_push_branch' ORDER BY id"
+    ).fetchall()
+    skipped = [json.loads(r["result_json"] or "{}") for r in rows]
+    assert any(s.get("skipped") == "bun_run_fix" for s in skipped)
+    assert any(s.get("skipped") == "bun_check" for s in skipped)
+
+
+def test_gh_push_branch_skip_checks_still_refuses_dirty_worktree(
+    db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`skip_checks=true` MUST still refuse when there are uncommitted changes —
+    we never let uncommitted diff leak into a remote ref."""
+    import os
+    import subprocess
+
+    bare = tmp_path / "upstream.git"
+    bare.mkdir()
+    subprocess.run(["git", "init", "--bare", "--initial-branch=main", str(bare)], check=True, capture_output=True)
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    env = os.environ | {
+        "GIT_AUTHOR_NAME": "robomp-bot",
+        "GIT_AUTHOR_EMAIL": "robomp-bot@example.invalid",
+        "GIT_COMMITTER_NAME": "robomp-bot",
+        "GIT_COMMITTER_EMAIL": "robomp-bot@example.invalid",
+    }
+    subprocess.run(["git", "init", "--initial-branch=main", str(seed)], check=True, capture_output=True)
+    (seed / "README.md").write_text("init\n")
+    for cmd in (
+        ["git", "-C", str(seed), "add", "."],
+        [
+            "git",
+            "-C",
+            str(seed),
+            "-c",
+            "user.email=robomp-bot@example.invalid",
+            "-c",
+            "user.name=robomp-bot",
+            "commit",
+            "-m",
+            "init",
+        ],
+        ["git", "-C", str(seed), "remote", "add", "origin", str(bare)],
+        ["git", "-C", str(seed), "push", "origin", "main"],
+    ):
+        subprocess.run(cmd, check=True, capture_output=True, env=env)
+
+    from robomp.sandbox import SandboxManager
+
+    mgr = SandboxManager(tmp_path / "workspaces")
+    ws = mgr.ensure_workspace(
+        repo="octo/widget",
+        number=42,
+        title="dirty",
+        clone_url=str(bare),
+        default_branch="main",
+        author_name="robomp-bot",
+        author_email="robomp-bot@example.invalid",
+    )
+    # package.json declares scripts.fix so the dirty-tree gate inside
+    # _run_pre_publish_bun_fix actually runs (the helper short-circuits to
+    # a no-op when there is no scripts.fix entry).
+    (ws.repo_dir / "package.json").write_text(
+        json.dumps({"scripts": {"fix": "ruff format"}}) + "\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "-C", str(ws.repo_dir), "add", "package.json"], check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(ws.repo_dir),
+            "-c",
+            "user.email=robomp-bot@example.invalid",
+            "-c",
+            "user.name=robomp-bot",
+            "commit",
+            "-m",
+            "wip",
+        ],
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+    # Now leave an uncommitted edit on disk.
+    (ws.repo_dir / "dirty.txt").write_text("uncommitted\n")
+
+    github = GitHubClient("tok", transport=httpx.MockTransport(lambda r: httpx.Response(500)))
+    loop, thread = _make_loop_in_background()
+    try:
+        bindings = ToolBindings(
+            db=db,
+            github=github,
+            git_transport=LocalGitTransport(token=None),
+            repo=_stub_repo(),
+            issue=IssueInfo(
+                repo="octo/widget",
+                number=42,
+                title="t",
+                body="",
+                state="open",
+                author="alice",
+                labels=(),
+                is_pull_request=False,
+            ),
+            workspace=ws,
+            loop=loop,
+            author_name="robomp-bot",
+            author_email="robomp-bot@example.invalid",
+        )
+        db.upsert_issue(
+            key=bindings.issue_key,
+            repo="octo/widget",
+            number=42,
+            state="reproducing",
+            branch=ws.branch,
+            session_dir=str(ws.session_dir),
+        )
+        tool = next(x for x in build(bindings) if x.name == "gh_push_branch")
+        with pytest.raises(RpcCommandError) as exc:
+            tool.execute({"skip_checks": True}, _ctx())
+    finally:
+        _stop_loop(loop, thread)
+
+    msg = str(exc.value)
+    assert "dirty worktree" in msg
+    # Branch did NOT reach the remote.
+    refs = subprocess.run(
+        ["git", "-C", str(bare), "for-each-ref", "--format=%(refname)"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert not any(r.startswith("refs/heads/farm/") for r in refs.stdout.splitlines()), refs.stdout
+
+
 def test_gh_open_pr_runs_fix_then_check_and_commits_fixup(
     db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
