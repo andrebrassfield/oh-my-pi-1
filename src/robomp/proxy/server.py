@@ -137,7 +137,6 @@ def _resolve_hmac_key(cfg: Settings) -> bytes:
     return cfg.gh_proxy_hmac_key.get_secret_value().encode("utf-8")
 
 
-
 _ORIGIN_READ_TIMEOUT_SECONDS = 5.0
 
 
@@ -198,6 +197,7 @@ def _assert_origin_safe_for_repo(repo_dir: Path, expected_repo: str) -> None:
             400,
             f"origin url does not match repo {expected_repo!r}; refusing to push",
         )
+
 
 def create_proxy_app(settings: Settings) -> FastAPI:
     """Build the gh-proxy FastAPI app bound to `settings`."""

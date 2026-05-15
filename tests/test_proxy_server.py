@@ -684,8 +684,11 @@ async def test_hmac_rejects_query_mutation(proxy_settings: Settings) -> None:
             200,
             json={
                 "number": int(req.url.params["number"]),
-                "title": "T", "body": "B", "state": "open",
-                "user": {"login": "x"}, "labels": [],
+                "title": "T",
+                "body": "B",
+                "state": "open",
+                "user": {"login": "x"},
+                "labels": [],
             },
         )
 
@@ -745,9 +748,7 @@ async def test_streamed_body_above_cap_rejected_with_413(proxy_settings: Setting
 # ============================================================================
 
 
-async def test_git_push_rejects_attacker_origin(
-    proxy_settings: Settings, upstream_repo: Path
-) -> None:
+async def test_git_push_rejects_attacker_origin(proxy_settings: Settings, upstream_repo: Path) -> None:
     """If the worktree's origin is rewritten to a non-github HTTPS URL,
     the push endpoint MUST refuse with 400 BEFORE invoking `git push` (which
     would carry the PAT to the attacker's host)."""
@@ -775,9 +776,7 @@ async def test_git_push_rejects_attacker_origin(
     assert not _bare_has_branch(upstream_repo, branch)
 
 
-async def test_git_push_rejects_origin_with_wrong_repo(
-    proxy_settings: Settings, upstream_repo: Path
-) -> None:
+async def test_git_push_rejects_origin_with_wrong_repo(proxy_settings: Settings, upstream_repo: Path) -> None:
     """github.com host is not enough — owner/repo MUST match the request."""
     branch = "farm/abc/mismatch"
     repo_dir, head = _stage_workspace(proxy_settings, upstream_repo, "octo/widget", 1, branch)
