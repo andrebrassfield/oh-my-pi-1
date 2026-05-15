@@ -1,4 +1,4 @@
-"""Logging configuration for robomp — JSON to file, pretty ANSI to stdout."""
+"""Logging configuration for roboomp — JSON to file, pretty ANSI to stdout."""
 
 from __future__ import annotations
 

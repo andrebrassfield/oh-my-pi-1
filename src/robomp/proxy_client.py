@@ -1,8 +1,8 @@
-"""Client half of the robomp ↔ gh-proxy channel.
+"""Client half of the roboomp ↔ gh-proxy channel.
 
 `GitHubProxyClient` implements `GitHubBackend` by HMAC-signing each request
 and forwarding to gh-proxy. `ProxyGitTransport` implements `GitTransport` by
-routing clone/fetch/push through the proxy too — robomp never holds the PAT.
+routing clone/fetch/push through the proxy too — roboomp never holds the PAT.
 
 Both classes share an `httpx.AsyncClient` + `httpx.Client` against the proxy.
 Tests can inject a custom transport (`httpx.MockTransport` or `ASGITransport`)

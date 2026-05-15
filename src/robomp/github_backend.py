@@ -22,7 +22,7 @@ from robomp.github_client import (
 
 
 class GitHubBackend(Protocol):
-    """Methods every caller in robomp uses against GitHub."""
+    """Methods every caller in roboomp uses against GitHub."""
 
     # ---- reads ----
     async def get_repo(self, repo: str) -> RepoInfo: ...

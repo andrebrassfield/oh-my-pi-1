@@ -1,6 +1,6 @@
-"""Shared HMAC signing/verification for the robomp ↔ gh-proxy channel.
+"""Shared HMAC signing/verification for the roboomp ↔ gh-proxy channel.
 
-Robomp signs every request to gh-proxy with an HMAC-SHA256 over
+Roboomp signs every request to gh-proxy with an HMAC-SHA256 over
 `(method, path, timestamp, sha256(body))`. The shared secret never leaves
 either container's memory, and the ±skew window bounds the replay surface.
 """
@@ -12,7 +12,7 @@ import hmac
 import time
 from typing import NamedTuple
 
-# Headers on every robomp→gh-proxy request.
+# Headers on every roboomp→gh-proxy request.
 HEADER_TIMESTAMP = "X-Robomp-Timestamp"  # unix seconds, integer string
 HEADER_SIGNATURE = "X-Robomp-Sig"  # hex-encoded HMAC-SHA256
 

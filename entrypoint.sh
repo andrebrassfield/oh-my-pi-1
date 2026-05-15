@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# robomp container entrypoint. No per-boot pip installs — everything is baked
+# roboomp container entrypoint. No per-boot pip installs — everything is baked
 # into the image; we only sanity-check the runtime mount and create state dirs.
 #
 # Used by both the orchestrator (CMD: `python -m robomp serve`) and the
@@ -25,7 +25,7 @@ fi
 
 : "${PI_ROOT:=/work/pi}"
 if [ ! -d "$PI_ROOT/packages/coding-agent" ]; then
-    echo "robomp: PI_ROOT=$PI_ROOT does not look like a pi checkout (no packages/coding-agent/)" >&2
+    echo "roboomp: PI_ROOT=$PI_ROOT does not look like a pi checkout (no packages/coding-agent/)" >&2
     exit 1
 fi
 

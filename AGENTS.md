@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-`robomp` is a self-hosted GitHub triage-and-fix bot that drives [`omp --mode rpc`](https://github.com/can1357/oh-my-pi) as a subprocess. On every issue opened in an allowlisted repository it classifies the issue, applies labels, then branches into one of: reproduce → fix → PR (`bug` / `documentation`), single-comment answer (`question`), single thoughtful comment (`enhancement` / `proposal`), or brief comment (`invalid` / `duplicate`). Follow-up comments and PR review comments resume the same omp session so the agent keeps its prior reasoning. If the orchestrator restarts mid-task, the dispatcher resumes the same session via `omp --continue` from the per-issue `session_dir`, so an interrupted task re-enters its prior reasoning instead of restarting from scratch. The orchestrator runs as a single FastAPI process inside Docker with SQLite-backed durable event state.
+`roboomp` is a self-hosted GitHub triage-and-fix bot that drives [`omp --mode rpc`](https://github.com/can1357/oh-my-pi) as a subprocess. On every issue opened in an allowlisted repository it classifies the issue, applies labels, then branches into one of: reproduce → fix → PR (`bug` / `documentation`), single-comment answer (`question`), single thoughtful comment (`enhancement` / `proposal`), or brief comment (`invalid` / `duplicate`). Follow-up comments and PR review comments resume the same omp session so the agent keeps its prior reasoning. If the orchestrator restarts mid-task, the dispatcher resumes the same session via `omp --continue` from the per-issue `session_dir`, so an interrupted task re-enters its prior reasoning instead of restarting from scratch. The orchestrator runs as a single FastAPI process inside Docker with SQLite-backed durable event state.
 
 ## Architecture & Data Flow
 
@@ -23,7 +23,7 @@ Webhook → durable queue → async dispatcher → per-issue git worktree → om
 - `src/robomp/prompts/` — Mustache-style `{{var}}` templates loaded by `persona.py` via `@cache` and `importlib.resources`. Shipped as package data (`pyproject.toml` `package-data`).
 - `tests/` — pytest suite. `test_worker_smoke.py` is gated on `ROBOMP_INTEGRATION=1`.
 - `data/` — runtime state (sqlite + WAL, `workspaces/`, `logs/`). Never committed.
-- `/work/pi/Dockerfile` — produces `oh-my-pi/artifacts:dev` (pi-natives `.node` + omp-rpc wheel). Built once per pi-source change via `bun run pi-artifacts`; robomp's runtime image consumes it via `COPY --from=`.
+- `/work/pi/Dockerfile` — produces `oh-my-pi/artifacts:dev` (pi-natives `.node` + omp-rpc wheel). Built once per pi-source change via `bun run pi-artifacts`; roboomp's runtime image consumes it via `COPY --from=`.
 
 ## Development Commands
 
@@ -108,7 +108,7 @@ Lint + format: TypeScript via Biome (config in `biome.json`), Python via Ruff (c
 - **Task runner**: `bun` (root `package.json` `scripts`). Always reach for an existing `bun run` recipe before invoking `docker compose` or `pytest` directly.
 - **Container runtime**: Docker Compose v2. The image embeds Bun 1.3.14 + a rustup launcher and exposes `omp` via a `/usr/local/bin/omp` shim; `ROBOMP_OMP_COMMAND=omp` should not need changing.
 - **Required env** (set in `.env`, see `.env.example`): `GITHUB_WEBHOOK_SECRET`, `ROBOMP_BOT_LOGIN`, `ROBOMP_GIT_AUTHOR_NAME`, `ROBOMP_GIT_AUTHOR_EMAIL`, `ROBOMP_REPO_ALLOWLIST`, plus model knobs (`ROBOMP_MODEL`, `ROBOMP_THINKING`, optional `ROBOMP_PROVIDER`) and rate-limit / concurrency / timeout overrides. **GitHub auth is mode-exclusive**: either set `ROBOMP_GH_PROXY_URL` + `ROBOMP_GH_PROXY_HMAC_KEY` (gh-proxy mode; PAT lives only in the sidecar container — the bundled compose default), or set `GITHUB_TOKEN` directly (single-process PAT mode). `Settings._validate_proxy_or_pat` rejects a `.env` that sets both.
-- **PI_ROOT staging**: removed. The pi-natives addon + omp-rpc wheel are produced by `/work/pi/Dockerfile` and tagged `oh-my-pi/artifacts:dev`; `bun run pi-artifacts` rebuilds them when pi source changes. The full pi checkout is still mounted read-only at `/work/pi` at runtime so omp executes against the live source. Build invalidation is now bounded: Python-only edits in robomp never trigger a natives recompile.
+- **PI_ROOT staging**: removed. The pi-natives addon + omp-rpc wheel are produced by `/work/pi/Dockerfile` and tagged `oh-my-pi/artifacts:dev`; `bun run pi-artifacts` rebuilds them when pi source changes. The full pi checkout is still mounted read-only at `/work/pi` at runtime so omp executes against the live source. Build invalidation is now bounded: Python-only edits in roboomp never trigger a natives recompile.
 - **Forbidden**: no docker-in-docker, no extra service containers, no new background workers outside `WorkerPool`. The container itself is the isolation boundary; per-issue isolation is the git worktree.
 
 ## Testing & QA

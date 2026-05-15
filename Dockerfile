@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 ###############################################################################
-# robomp — orchestrator image
+# roboomp — orchestrator image
 #
 # Build is split across three stages:
 #
@@ -11,7 +11,7 @@
 #   2) web-builder    — Bun + Vite compile the SolidJS dashboard bundle from
 #      the `web/` workspace into `web/dist/`.
 #   3) runtime        — slim Python 3.12 image that copies in (1) the natives
-#      + wheel, (2) the dashboard bundle, and (3) the robomp source.
+#      + wheel, (2) the dashboard bundle, and (3) the roboomp source.
 #
 # At runtime the full pi checkout is mounted read-only at /work/pi so `omp`
 # (the Bun shim below) executes the coding-agent source directly. The image
@@ -40,7 +40,7 @@ COPY web/ ./web/
 RUN bun --cwd=web run build
 
 ############################
-# 3) runtime — slim image with everything robomp needs at boot.
+# 3) runtime — slim image with everything roboomp needs at boot.
 ############################
 FROM python:3.12-slim-bookworm AS runtime
 
@@ -96,13 +96,13 @@ RUN cat > /usr/local/bin/omp <<'EOF' && chmod +x /usr/local/bin/omp
 set -euo pipefail
 : "${PI_ROOT:=/work/pi}"
 if [ ! -d "$PI_ROOT/packages/coding-agent" ]; then
-  echo "robomp: PI_ROOT=$PI_ROOT does not look like a pi checkout" >&2
+  echo "roboomp: PI_ROOT=$PI_ROOT does not look like a pi checkout" >&2
   exit 127
 fi
 exec bun "$PI_ROOT/packages/coding-agent/src/cli.ts" "$@"
 EOF
 
-# robomp itself. Drop the Vite-built dashboard into the package tree before
+# roboomp itself. Drop the Vite-built dashboard into the package tree before
 # `pip install` so it lands in the installed wheel (`static/**/*` is declared
 # as package-data in pyproject.toml).
 COPY pyproject.toml ./

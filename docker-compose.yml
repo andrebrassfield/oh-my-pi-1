@@ -1,6 +1,6 @@
 services:
   # ───────────────────────────────────────────────────────────────────────────
-  # robomp orchestrator
+  # roboomp orchestrator
   #
   # NOTE: `env_file:` is INTENTIONALLY ABSENT. We never want the gh-proxy's
   # PAT (`GITHUB_TOKEN` in .env) to leak into this container's environment.

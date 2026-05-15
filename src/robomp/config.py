@@ -1,4 +1,4 @@
-"""Env-driven configuration for robomp."""
+"""Env-driven configuration for roboomp."""
 
 from __future__ import annotations
 
