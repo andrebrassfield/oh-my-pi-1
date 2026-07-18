@@ -77,3 +77,30 @@ python/robomp/.env
 
 # Local, machine-specific boot perf baseline (see packages/coding-agent/scripts/bench-guard.ts)
 packages/coding-agent/bench/boot-baseline.json
+
+# .gitignore additions for ~/Code/oh-my-pi/
+# Phase B final, 2026-06-29 14:48 CDT (Dre scope expansion).
+
+# Dre's custom integrations on upstream — never commit
+extensions/omp/
+extensions/omp/**/logs/
+extensions/omp/**/.env.local
+
+# Centralized secrets at oh-my-pi root — never commit
+.env
+models.local.yml
+config.local.yml
+
+# Generated state
+.history/
+*.local
+
+# Local dev-workspace config + backups — never commit (Fable 2026-07-17, fork-sync hygiene)
+config.yml
+models.yml
+CLAUDE.md
+.mcp.json
+.gemma4-weights-path
+modelfiles/
+scripts/completed/
+*.bak.*
